@@ -27,6 +27,19 @@
 
 > whisper.cpp는 64-bit만 빌드합니다. 32-bit 기기는 속도/메모리 문제로 지원하지 않습니다.
 
+## Android 기기에 설치 (다운로드)
+
+GitHub **Releases**에서 APK를 받아 설치할 수 있습니다 (인터넷은 APK·모델 다운로드에만 사용).
+
+1. [Releases](https://github.com/fmw0cel/call-transcribe/releases/latest) 페이지를 엽니다.
+2. **Assets**에서 `app-debug.apk`를 다운로드합니다.
+3. 기기에서 **출처를 알 수 없는 앱** 설치를 허용한 뒤 APK를 탭해 설치합니다.
+4. 앱 실행 후 **모델 준비**에서 whisper 모델을 한 번 내려받습니다.
+
+> CI가 올리는 디버그 APK는 Gradle 기본 디버그 키로 서명되어 있어 별도 서명 없이 sideload 할 수 있습니다.
+
+소스에서 직접 빌드하려면 아래 절차를 사용하세요.
+
 ## 빌드
 
 ```bash
@@ -120,3 +133,6 @@ design/                   # 앱 아이콘 원본(icon-1024.png, icon-preview.png
 
 `main` 브랜치에 push하거나 PR을 열면 GitHub Actions(`.github/workflows/android.yml`)가
 테스트, 린트, 디버그 APK 빌드를 수행하고 APK를 아티팩트로 올립니다.
+
+`v*` 태그(예: `v1.0.0`)를 push하면 `.github/workflows/release.yml`이
+APK를 GitHub Releases에 게시합니다.
