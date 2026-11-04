@@ -4,7 +4,7 @@
 
 ## 한국어
 
-**로컬 전사(Local Transcribe)는 사용자의 음성과 전사 결과를 수집하거나 외부로 전송하지 않습니다.**
+**음성전사는 사용자의 음성과 전사 결과를 수집하거나 외부로 전송하지 않습니다.**
 
 - 녹음된 오디오와 전사 결과는 기기 내부 저장소에만 저장되며, 개발자나 제3자에게 전송되지 않습니다.
 - 음성 인식(Whisper)은 전부 기기에서 실행됩니다. 클라우드 전사 서버를 사용하지 않습니다.
@@ -17,7 +17,7 @@
 
 ## English
 
-**Local Transcribe does not collect or transmit your audio or transcripts.**
+**This app does not collect or transmit your audio or transcripts.**
 
 - Recordings and transcripts are stored only in the app's private storage on your device.
 - Speech recognition (Whisper) runs entirely on-device; there is no cloud transcription server.

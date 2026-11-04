@@ -1,4 +1,4 @@
-# 로컬 전사 (Local Transcribe)
+# 음성전사
 
 안드로이드에서 **완전 오프라인**으로 음성을 텍스트로 바꾸는 앱입니다.
 [whisper.cpp](https://github.com/ggml-org/whisper.cpp)를 NDK로 직접 빌드해 JNI로 호출하며,
