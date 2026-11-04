@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon layer: waveform bars turning into a text cursor. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path android:fillColor="#FFFFFFFF" android:pathData="M33,51h5v8h-5z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M41,43h5v22h-5z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M49,35h5v38h-5z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M57,29h5v50h-5z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M65,39h5v30h-5z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M73,47h5v14h-5z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M81,45h5v27h-5z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M73,72h17v5h-17z" />
+</vector>

@@ -1,0 +1,20 @@
+# Normalize line endings on checkout/commit.
+* text=auto
+
+# Scripts must keep LF so they run on Linux/macOS CI.
+gradlew text eol=lf
+*.sh    text eol=lf
+*.bat   text eol=crlf
+*.kts   text eol=lf
+
+# Binary assets.
+*.png  binary
+*.webp binary
+*.jpg  binary
+*.jar  binary
+*.bin  binary
+*.so   binary
+
+# Keep GitHub's language stats focused on this project, not the vendored engine.
+whisper.cpp/** linguist-vendored
+design/**      linguist-documentation
