@@ -14,8 +14,8 @@ android {
         applicationId = "com.localtranscribe"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         ndk {
             // 64-bit only: whisper.cpp is heavy, and every 32-bit device is too slow anyway.
@@ -92,6 +92,8 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    implementation("androidx.work:work-runtime-ktx:2.11.1")
+    implementation("androidx.documentfile:documentfile:1.1.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

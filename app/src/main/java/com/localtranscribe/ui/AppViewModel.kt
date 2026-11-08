@@ -1,16 +1,22 @@
 package com.localtranscribe.ui
 
 import android.app.Application
+import android.content.Intent
 import android.net.Uri
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.localtranscribe.audio.AudioDecoder
 import com.localtranscribe.audio.WavRecorder
 import com.localtranscribe.data.Transcript
 import com.localtranscribe.data.TranscriptStore
 import com.localtranscribe.model.InstalledModel
 import com.localtranscribe.model.ModelRepository
 import com.localtranscribe.model.ModelSpec
+import com.localtranscribe.watch.FolderWatchRunner
+import com.localtranscribe.watch.FolderWatchScheduler
+import com.localtranscribe.watch.TranscriptionPipeline
+import com.localtranscribe.watch.WatchFolderRepository
+import com.localtranscribe.watch.WatchQueuedFile
 import com.localtranscribe.whisper.Transcriber
 import com.localtranscribe.whisper.TranscriptSegment
 import java.io.File
@@ -32,6 +38,7 @@ sealed interface Screen {
     data object Home : Screen
     data class Detail(val id: String) : Screen
     data object Models : Screen
+    data object WatchFolder : Screen
 }
 
 enum class Stage { DECODING, TRANSCRIBING, IMPORT }
@@ -46,6 +53,11 @@ data class BusyState(
 data class DownloadState(
     val spec: ModelSpec,
     val progress: Float = 0f,
+)
+
+data class PendingAudio(
+    val uri: Uri,
+    val displayName: String,
 )
 
 data class UiState(
@@ -63,6 +75,19 @@ data class UiState(
     val translate: Boolean = false,
     val error: String? = null,
     val notice: String? = null,
+    val pendingAudio: PendingAudio? = null,
+    val watch: WatchFolderUi = WatchFolderUi(
+        hasFolder = false,
+        folderLabel = "선택 안 됨",
+        enabled = false,
+        autoTranscribe = true,
+        whileCharging = false,
+        lastScanAt = 0L,
+        processedCount = 0,
+        queuedCount = 0,
+        scanInProgress = false,
+    ),
+    val watchQueue: List<WatchQueuedFile> = emptyList(),
 ) {
     val ready: Boolean get() = selectedModel != null
 }
@@ -88,6 +113,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("settings", Application.MODE_PRIVATE)
     private val models = ModelRepository(application)
     private val store = TranscriptStore(application)
+    private val watchRepo = WatchFolderRepository(application)
+    private val pipeline = TranscriptionPipeline(application, models, store)
 
     private val _state = MutableStateFlow(
         UiState(
@@ -104,10 +131,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var downloadJob: Job? = null
     private var transcriber: Transcriber? = null
     private var recordStartedAt = 0L
+    private var watchScanJob: Job? = null
 
     init {
+        models.ensureDefaultSelection()
         refreshModels()
         refreshTranscripts()
+        refreshWatchFolder()
+        FolderWatchScheduler.sync(application)
         if (_state.value.selectedModel == null) {
             _state.value = _state.value.copy(screen = Screen.Models)
         }
@@ -195,6 +226,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _state.value = _state.value.copy(screen = Screen.Models)
     }
 
+    fun openWatchFolder() {
+        refreshWatchFolder()
+        _state.value = _state.value.copy(screen = Screen.WatchFolder)
+    }
+
     fun openTranscript(id: String) {
         val transcript = store.load(id)
         _state.value = _state.value.copy(screen = Screen.Detail(id), detail = transcript)
@@ -232,6 +268,154 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearMessages() {
         _state.value = _state.value.copy(error = null, notice = null)
+    }
+
+    // ------------------------------------------------------ folder watch ---
+
+    fun refreshWatchFolder() {
+        val app = getApplication<Application>()
+        _state.value = _state.value.copy(
+            watch = WatchFolderUi(
+                hasFolder = watchRepo.treeUri() != null,
+                folderLabel = watchRepo.folderDisplayName(app),
+                enabled = watchRepo.isEnabled(),
+                autoTranscribe = watchRepo.autoTranscribe(),
+                whileCharging = watchRepo.requiresCharging(),
+                lastScanAt = watchRepo.lastScanAt(),
+                processedCount = watchRepo.processedCount(),
+                queuedCount = watchRepo.queuedCount(),
+                scanInProgress = watchScanJob?.isActive == true,
+            ),
+            watchQueue = watchRepo.queue(),
+        )
+    }
+
+    fun setWatchAutoTranscribe(enabled: Boolean) {
+        watchRepo.setAutoTranscribe(enabled)
+        refreshWatchFolder()
+        _state.value = _state.value.copy(
+            notice = if (enabled) {
+                "찾은 파일을 바로 전사합니다."
+            } else {
+                "폴더 검사 후 홈에서 전사할 수 있습니다."
+            },
+        )
+    }
+
+    fun dismissWatchQueued(key: String) {
+        watchRepo.removeFromQueue(key)
+        refreshWatchFolder()
+    }
+
+    fun transcribeWatchQueued(key: String) {
+        val queued = watchRepo.queue().firstOrNull { it.key == key } ?: return
+        transcribeImportedAudio(
+            uri = queued.uri,
+            name = queued.displayName,
+            watchKey = key,
+        )
+    }
+
+    fun persistAndSetWatchFolder(uri: Uri) {
+        val app = getApplication<Application>()
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+            Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+        runCatching {
+            app.contentResolver.takePersistableUriPermission(uri, flags)
+        }.onFailure {
+            _state.value = _state.value.copy(error = "폴더 권한을 저장하지 못했습니다.")
+            return
+        }
+        val label = DocumentFile.fromTreeUri(app, uri)?.name ?: "선택된 폴더"
+        watchRepo.saveTreeUri(uri)
+        watchRepo.saveFolderLabel(label)
+        refreshWatchFolder()
+        FolderWatchScheduler.sync(app)
+        _state.value = _state.value.copy(notice = "감시 폴더를 설정했습니다.")
+    }
+
+    fun clearWatchFolder() {
+        val app = getApplication<Application>()
+        watchRepo.clearTreeUri()
+        FolderWatchScheduler.sync(app)
+        refreshWatchFolder()
+        _state.value = _state.value.copy(notice = "감시 폴더를 해제했습니다.")
+    }
+
+    fun setWatchEnabled(enabled: Boolean) {
+        val app = getApplication<Application>()
+        if (enabled && watchRepo.treeUri() == null) {
+            _state.value = _state.value.copy(error = "먼저 폴더를 선택해 주세요.")
+            return
+        }
+        watchRepo.setEnabled(enabled)
+        FolderWatchScheduler.sync(app)
+        refreshWatchFolder()
+        if (enabled) {
+            FolderWatchScheduler.runNow(app)
+        }
+    }
+
+    fun setWatchWhileCharging(enabled: Boolean) {
+        val app = getApplication<Application>()
+        watchRepo.setRequiresCharging(enabled)
+        FolderWatchScheduler.sync(app)
+        refreshWatchFolder()
+    }
+
+    fun scanWatchFolderNow() {
+        val current = _state.value
+        if (current.watch.scanInProgress || current.busy != null || current.isRecording) return
+        if (watchRepo.treeUri() == null) {
+            _state.value = current.copy(error = "먼저 폴더를 선택해 주세요.")
+            return
+        }
+        if (watchRepo.autoTranscribe() && !current.ready) {
+            _state.value = current.copy(error = "먼저 모델을 준비해 주세요.", screen = Screen.Models)
+            return
+        }
+
+        watchScanJob?.cancel()
+        watchScanJob = viewModelScope.launch {
+            refreshWatchFolder()
+            try {
+                val result = FolderWatchRunner.run(
+                    context = getApplication(),
+                    onFileStarting = { name ->
+                        _state.value = _state.value.copy(
+                            busy = BusyState(Stage.DECODING, 0f, title = name),
+                        )
+                    },
+                    onFileProgress = { name, stage, fraction ->
+                        _state.value = _state.value.copy(
+                            busy = BusyState(stage, fraction.coerceIn(0f, 1f), title = name),
+                        )
+                    },
+                )
+                refreshTranscripts()
+                refreshWatchFolder()
+                val message = when {
+                    result.skippedCharging -> "충전 중에만 처리하도록 설정되어 있습니다."
+                    result.skippedNoModel -> "모델이 준비되지 않았습니다."
+                    result.queued > 0 -> "새 파일 ${result.queued}개를 찾았습니다. 홈에서 전사할 수 있습니다."
+                    result.transcribed > 0 -> "새 파일 ${result.transcribed}개를 전사했습니다."
+                    result.scanned > 0 -> "새 파일을 처리하지 못했습니다."
+                    else -> "새 오디오 파일이 없습니다."
+                }
+                _state.value = _state.value.copy(busy = null, notice = message, error = result.error)
+            } catch (t: Throwable) {
+                if (t is CancellationException) {
+                    _state.value = _state.value.copy(busy = null)
+                } else {
+                    _state.value = _state.value.copy(
+                        busy = null,
+                        error = t.message ?: "폴더 검사에 실패했습니다.",
+                    )
+                }
+            } finally {
+                refreshWatchFolder()
+            }
+        }
     }
 
     // ----------------------------------------------------------- recording ---
@@ -336,7 +520,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     // -------------------------------------------------------------- import ---
 
-    fun importAudio(uri: Uri) {
+    fun stagePendingAudio(uri: Uri) {
+        val current = _state.value
+        if (current.busy != null || current.isRecording) return
+        val name = queryDisplayName(uri) ?: "가져온 오디오"
+        _state.value = current.copy(pendingAudio = PendingAudio(uri, name), error = null)
+    }
+
+    fun clearPendingAudio() {
+        _state.value = _state.value.copy(pendingAudio = null)
+    }
+
+    fun transcribePendingAudio() {
+        val pending = _state.value.pendingAudio ?: return
+        transcribeImportedAudio(uri = pending.uri, name = pending.displayName, watchKey = null)
+    }
+
+    private fun transcribeImportedAudio(uri: Uri, name: String, watchKey: String?) {
         val current = _state.value
         if (current.busy != null || current.isRecording) return
         if (!current.ready) {
@@ -344,39 +544,49 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        val app = getApplication<Application>()
         workJob?.cancel()
         workJob = viewModelScope.launch {
-            val name = queryDisplayName(uri) ?: "가져온 오디오"
-            val temp = File(app.cacheDir, "imports/import-${System.currentTimeMillis()}.wav")
             try {
                 _state.value = _state.value.copy(
                     busy = BusyState(Stage.DECODING, 0f, title = name),
+                    pendingAudio = null,
                     error = null,
                 )
 
-                val decoded = withContext(Dispatchers.IO) {
-                    AudioDecoder.decodeTo16kWav(
-                        context = app,
-                        uri = uri,
-                        target = temp,
-                        onProgress = { progress ->
-                            _state.value = _state.value.copy(
-                                busy = (_state.value.busy ?: BusyState(Stage.DECODING))
-                                    .copy(progress = progress.coerceIn(0f, 1f)),
-                            )
-                        },
-                        isCancelled = { !isActive },
-                    )
+                val transcript = pipeline.transcribeUri(
+                    uri = uri,
+                    titleHint = name,
+                    language = _state.value.language,
+                    translate = _state.value.translate,
+                    onProgress = { progress ->
+                        _state.value = _state.value.copy(
+                            busy = BusyState(
+                                stage = progress.stage,
+                                progress = progress.fraction.coerceIn(0f, 1f),
+                                title = name,
+                            ),
+                        )
+                    },
+                )
+
+                if (watchKey != null) {
+                    watchRepo.markProcessed(watchKey)
+                    watchRepo.removeFromQueue(watchKey)
+                    refreshWatchFolder()
                 }
 
-                handleTranscription(
-                    wav = decoded.file,
-                    durationMs = decoded.durationMs,
-                    titleHint = name,
-                    deleteWhenDone = true,
+                _state.value = _state.value.copy(
+                    busy = null,
+                    transcripts = store.list(),
+                    screen = Screen.Detail(transcript.id),
+                    detail = transcript,
                 )
             } catch (t: Throwable) {
+                if (watchKey == null) {
+                    _state.value = _state.value.copy(
+                        pendingAudio = PendingAudio(uri, name),
+                    )
+                }
                 handleWorkError(t)
             }
         }
@@ -481,6 +691,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         transcriber?.cancel()
         workJob?.cancel()
+        watchScanJob?.cancel()
         transcriber = null
         _state.value = _state.value.copy(busy = null)
     }
@@ -508,6 +719,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
         timerJob?.cancel()
         workJob?.cancel()
+        watchScanJob?.cancel()
         recorder?.cancel()
         transcriber?.cancel()
     }

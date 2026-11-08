@@ -2,6 +2,7 @@ package com.localtranscribe.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -20,8 +21,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
@@ -47,11 +51,31 @@ fun AppRoot(vm: AppViewModel = viewModel()) {
 
     val audioPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
-    ) { uri -> uri?.let(vm::importAudio) }
+    ) { uri -> uri?.let(vm::stagePendingAudio) }
 
     val modelPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri -> uri?.let(vm::importModel) }
+
+    val folderPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri -> uri?.let(vm::persistAndSetWatchFolder) }
+
+    val notificationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { _ -> }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                vm.refreshTranscripts()
+                vm.refreshWatchFolder()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(state.error) {
         state.error?.let {
@@ -96,12 +120,42 @@ fun AppRoot(vm: AppViewModel = viewModel()) {
                     onStop = vm::stopRecording,
                     onCancelRecording = vm::cancelRecording,
                     onImport = { audioPicker.launch(arrayOf("audio/*")) },
+                    onTranscribePending = vm::transcribePendingAudio,
+                    onClearPending = vm::clearPendingAudio,
+                    pendingAudio = state.pendingAudio,
                     onOpenModels = vm::openModels,
                     onOpenTranscript = vm::openTranscript,
                     onDeleteTranscript = vm::deleteTranscript,
                     onLanguageChange = vm::setLanguage,
                     onTranslateChange = vm::setTranslate,
                     onCancelWork = vm::cancelWork,
+                    onOpenWatchFolder = vm::openWatchFolder,
+                    watch = state.watch,
+                    watchQueue = state.watchQueue,
+                    onTranscribeWatchQueued = vm::transcribeWatchQueued,
+                    onDismissWatchQueued = vm::dismissWatchQueued,
+                )
+
+                Screen.WatchFolder -> WatchFolderScreen(
+                    watch = state.watch,
+                    onBack = vm::goHome,
+                    onPickFolder = { folderPicker.launch(null) },
+                    onClearFolder = vm::clearWatchFolder,
+                    onToggleAutoTranscribe = vm::setWatchAutoTranscribe,
+                    onToggleEnabled = { enabled ->
+                        if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            val granted = ContextCompat.checkSelfPermission(
+                                context,
+                                android.Manifest.permission.POST_NOTIFICATIONS,
+                            ) == PackageManager.PERMISSION_GRANTED
+                            if (!granted) {
+                                notificationLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                        }
+                        vm.setWatchEnabled(enabled)
+                    },
+                    onToggleWhileCharging = vm::setWatchWhileCharging,
+                    onScanNow = vm::scanWatchFolderNow,
                 )
 
                 is Screen.Detail -> DetailScreen(

@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">음성전사</string>
+    <string name="watch_notification_channel">자동 폴더 전사</string>
+    <string name="watch_notification_channel_desc">지정한 폴더에서 새 오디오를 전사할 때 표시됩니다.</string>
+    <string name="watch_notification_title">폴더 자동 전사</string>
 </resources>

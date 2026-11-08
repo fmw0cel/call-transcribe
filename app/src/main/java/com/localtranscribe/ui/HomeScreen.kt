@@ -23,10 +23,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -56,6 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.localtranscribe.R
 import com.localtranscribe.data.Transcript
+import com.localtranscribe.watch.WatchQueuedFile
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -73,6 +78,14 @@ fun HomeScreen(
     onLanguageChange: (String) -> Unit,
     onTranslateChange: (Boolean) -> Unit,
     onCancelWork: () -> Unit,
+    onOpenWatchFolder: () -> Unit,
+    watch: WatchFolderUi,
+    pendingAudio: PendingAudio?,
+    onTranscribePending: () -> Unit,
+    onClearPending: () -> Unit,
+    watchQueue: List<WatchQueuedFile>,
+    onTranscribeWatchQueued: (String) -> Unit,
+    onDismissWatchQueued: (String) -> Unit,
 ) {
     var pendingDelete by remember { mutableStateOf<Transcript?>(null) }
 
@@ -117,12 +130,49 @@ fun HomeScreen(
                 onClick = onImport,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape = RoundedCornerShape(16.dp),
-                enabled = state.ready && state.busy == null && !state.isRecording,
+                enabled = state.busy == null && !state.isRecording,
             ) {
                 Icon(Icons.Filled.AudioFile, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("오디오 파일 가져오기")
             }
+        }
+
+        pendingAudio?.let { pending ->
+            item {
+                PendingAudioCard(
+                    sourceLabel = "가져온 파일",
+                    displayName = pending.displayName,
+                    canTranscribe = state.ready && state.busy == null && !state.isRecording,
+                    canClear = state.busy == null && !state.isRecording,
+                    onTranscribe = onTranscribePending,
+                    onClear = onClearPending,
+                )
+            }
+        }
+
+        if (watchQueue.isNotEmpty()) {
+            item {
+                Text(
+                    text = "폴더에서 찾은 파일",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            items(watchQueue, key = { it.key }) { queued ->
+                PendingAudioCard(
+                    sourceLabel = "폴더",
+                    displayName = queued.displayName,
+                    canTranscribe = state.ready && state.busy == null && !state.isRecording,
+                    canClear = state.busy == null && !state.isRecording,
+                    onTranscribe = { onTranscribeWatchQueued(queued.key) },
+                    onClear = { onDismissWatchQueued(queued.key) },
+                )
+            }
+        }
+
+        item {
+            WatchFolderStrip(watch = watch, onOpen = onOpenWatchFolder)
         }
 
         state.busy?.let { busy ->
@@ -196,6 +246,113 @@ fun HomeScreen(
 }
 
 @Composable
+private fun PendingAudioCard(
+    sourceLabel: String,
+    displayName: String,
+    canTranscribe: Boolean,
+    canClear: Boolean,
+    onTranscribe: () -> Unit,
+    onClear: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 14.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.AudioFile,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    sourceLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    displayName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Button(
+                onClick = onTranscribe,
+                enabled = canTranscribe,
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Icon(
+                    Icons.Filled.PlayArrow,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("전사 시작")
+            }
+            IconButton(onClick = onClear, enabled = canClear) {
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = "파일 선택 취소",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WatchFolderStrip(watch: WatchFolderUi, onOpen: () -> Unit) {
+    val subtitle = when {
+        !watch.hasFolder -> "폴더를 고르면 새 파일을 찾습니다"
+        watch.queuedCount > 0 && !watch.autoTranscribe ->
+            "대기 ${watch.queuedCount}개 · ${watch.folderLabel}"
+        watch.enabled && watch.autoTranscribe -> "자동 전사 켜짐 · ${watch.folderLabel}"
+        watch.enabled -> "수동 전사 · ${watch.folderLabel}"
+        else -> "꺼짐 · ${watch.folderLabel}"
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onOpen),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.FolderOpen,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text("자동 폴더 전사", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(
+                imageVector = Icons.Filled.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+@Composable
 private fun ModelStrip(model: String?, onOpenModels: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onOpenModels),
@@ -219,7 +376,11 @@ private fun ModelStrip(model: String?, onOpenModels: () -> Unit) {
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
-                    text = if (model == null) "탭해서 오프라인 모델을 받아오세요" else "기기 내 추론 · 오프라인",
+                    text = if (model == null) {
+                        "Base 모델(약 60MB) 받기 권장 · 오프라인 전사"
+                    } else {
+                        "기기 내 추론 · 오프라인"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

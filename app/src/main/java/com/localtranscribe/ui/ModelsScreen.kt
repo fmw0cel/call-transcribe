@@ -102,6 +102,7 @@ fun ModelsScreen(
 
                 ModelRow(
                     title = spec.displayName,
+                    recommended = spec.id == ModelCatalog.RECOMMENDED_ID,
                     subtitle = spec.note,
                     sizeText = formatBytes(installed?.sizeBytes ?: spec.sizeBytes),
                     installed = installed != null,
@@ -212,6 +213,7 @@ fun ModelsScreen(
 @Composable
 private fun ModelRow(
     title: String,
+    recommended: Boolean = false,
     subtitle: String,
     sizeText: String,
     installed: Boolean,
@@ -237,6 +239,14 @@ private fun ModelRow(
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(title, style = MaterialTheme.typography.titleSmall)
+                        if (recommended) {
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "권장",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                         Spacer(Modifier.width(8.dp))
                         Text(
                             sizeText,

@@ -29,32 +29,35 @@ data class InstalledModel(
 }
 
 object ModelCatalog {
-    private const val BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
+    private const val HF_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
+
+    /** Default for new installs and auto folder transcription when nothing is selected. */
+    const val RECOMMENDED_ID = "base-q5_1"
 
     /** Multilingual checkpoints - required for Korean. */
     val downloadable = listOf(
-        ModelSpec(
-            id = "tiny-q5_1",
-            displayName = "Tiny",
-            fileName = "ggml-tiny-q5_1.bin",
-            sizeBytes = 32_152_673,
-            url = "$BASE/ggml-tiny-q5_1.bin",
-            note = "가장 빠름 · 정확도 낮음 · 저사양 기기용",
-        ),
         ModelSpec(
             id = "base-q5_1",
             displayName = "Base",
             fileName = "ggml-base-q5_1.bin",
             sizeBytes = 59_707_625,
-            url = "$BASE/ggml-base-q5_1.bin",
-            note = "속도와 정확도의 균형 · 권장",
+            url = "$HF_BASE/ggml-base-q5_1.bin",
+            note = "속도와 정확도의 균형 · 통화·일상 녹음 권장",
+        ),
+        ModelSpec(
+            id = "tiny-q5_1",
+            displayName = "Tiny",
+            fileName = "ggml-tiny-q5_1.bin",
+            sizeBytes = 32_152_673,
+            url = "$HF_BASE/ggml-tiny-q5_1.bin",
+            note = "가장 빠름 · 정확도 낮음 · 저사양 기기용",
         ),
         ModelSpec(
             id = "small-q5_1",
             displayName = "Small",
             fileName = "ggml-small-q5_1.bin",
             sizeBytes = 190_085_487,
-            url = "$BASE/ggml-small-q5_1.bin",
+            url = "$HF_BASE/ggml-small-q5_1.bin",
             note = "정확도 높음 · 느림 · 4GB 이상 RAM 권장",
         ),
         ModelSpec(
@@ -62,7 +65,7 @@ object ModelCatalog {
             displayName = "Turbo",
             fileName = "ggml-large-v3-turbo-q5_0.bin",
             sizeBytes = 574_041_195,
-            url = "$BASE/ggml-large-v3-turbo-q5_0.bin",
+            url = "$HF_BASE/ggml-large-v3-turbo-q5_0.bin",
             note = "Large v3 Turbo · 정확도 최고 · 574 MB · 8GB RAM / 넉넉한 저장 공간 권장",
         ),
     )
@@ -94,11 +97,35 @@ class ModelRepository(context: Context) {
 
     fun selectedId(): String? = prefs.getString(KEY_SELECTED_MODEL, null)
 
-    /** Selected model, falling back to the first installed one. */
+    /** Selected model, falling back to [ModelCatalog.RECOMMENDED_ID] when installed. */
     fun selected(): InstalledModel? {
         val all = installed()
         val id = selectedId()
-        return all.firstOrNull { it.id == id } ?: all.firstOrNull()
+        all.firstOrNull { it.id == id }?.let { return it }
+        return pickPreferredInstalled(all)
+    }
+
+    /**
+     * If the user has models but none chosen (e.g. after upgrade), prefer Base.
+     */
+    fun ensureDefaultSelection() {
+        if (selectedId() != null) return
+        val preferred = pickPreferredInstalled(installed()) ?: return
+        select(preferred)
+    }
+
+    private fun pickPreferredInstalled(all: List<InstalledModel>): InstalledModel? {
+        if (all.isEmpty()) return null
+        val order = listOf(
+            ModelCatalog.RECOMMENDED_ID,
+            "tiny-q5_1",
+            "small-q5_1",
+            "large-v3-turbo-q5_0",
+        )
+        for (modelId in order) {
+            all.firstOrNull { it.id == modelId }?.let { return it }
+        }
+        return all.minByOrNull { it.sizeBytes }
     }
 
     fun select(model: InstalledModel) {
