@@ -14,8 +14,8 @@ android {
         applicationId = "com.localtranscribe"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2.0"
 
         ndk {
             // 64-bit only: whisper.cpp is heavy, and every 32-bit device is too slow anyway.
