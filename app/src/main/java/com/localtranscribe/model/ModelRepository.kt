@@ -38,7 +38,7 @@ object ModelCatalog {
     val downloadable = listOf(
         ModelSpec(
             id = "base-q5_1",
-            displayName = "Base",
+            displayName = "일반",
             fileName = "ggml-base-q5_1.bin",
             sizeBytes = 59_707_625,
             url = "$HF_BASE/ggml-base-q5_1.bin",
@@ -46,7 +46,7 @@ object ModelCatalog {
         ),
         ModelSpec(
             id = "tiny-q5_1",
-            displayName = "Tiny",
+            displayName = "빠름",
             fileName = "ggml-tiny-q5_1.bin",
             sizeBytes = 32_152_673,
             url = "$HF_BASE/ggml-tiny-q5_1.bin",
@@ -54,7 +54,7 @@ object ModelCatalog {
         ),
         ModelSpec(
             id = "small-q5_1",
-            displayName = "Small",
+            displayName = "정확함",
             fileName = "ggml-small-q5_1.bin",
             sizeBytes = 190_085_487,
             url = "$HF_BASE/ggml-small-q5_1.bin",
@@ -62,11 +62,11 @@ object ModelCatalog {
         ),
         ModelSpec(
             id = "large-v3-turbo-q5_0",
-            displayName = "Turbo",
+            displayName = "매우 정확함",
             fileName = "ggml-large-v3-turbo-q5_0.bin",
             sizeBytes = 574_041_195,
             url = "$HF_BASE/ggml-large-v3-turbo-q5_0.bin",
-            note = "Large v3 Turbo · 정확도 최고 · 574 MB · 8GB RAM / 넉넉한 저장 공간 권장",
+            note = "정확도 최고 · 574 MB · 8GB RAM / 넉넉한 저장 공간 권장",
         ),
     )
 }

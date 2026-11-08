@@ -2,6 +2,7 @@ package com.localtranscribe.ui
 
 import android.app.Application
 import android.content.Intent
+import com.localtranscribe.BuildConfig
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
@@ -16,6 +17,10 @@ import com.localtranscribe.watch.FolderWatchRunner
 import com.localtranscribe.watch.FolderWatchScheduler
 import com.localtranscribe.watch.TranscriptionPipeline
 import com.localtranscribe.watch.WatchFolderRepository
+import com.localtranscribe.update.AppRelease
+import com.localtranscribe.update.AppReleaseChecker
+import com.localtranscribe.update.AppUpdateInstaller
+import com.localtranscribe.update.AppVersion
 import com.localtranscribe.watch.WatchQueuedFile
 import com.localtranscribe.whisper.Transcriber
 import com.localtranscribe.whisper.TranscriptSegment
@@ -88,9 +93,19 @@ data class UiState(
         scanInProgress = false,
     ),
     val watchQueue: List<WatchQueuedFile> = emptyList(),
+    val appUpdate: AppUpdateUi = AppUpdateUi(currentVersion = ""),
 ) {
     val ready: Boolean get() = selectedModel != null
 }
+
+data class AppUpdateUi(
+    val currentVersion: String,
+    val latestVersion: String? = null,
+    val updateAvailable: Boolean = false,
+    val checking: Boolean = false,
+    val downloading: Boolean = false,
+    val downloadProgress: Float = 0f,
+)
 
 const val LANG_AUTO = "auto"
 
@@ -132,6 +147,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var transcriber: Transcriber? = null
     private var recordStartedAt = 0L
     private var watchScanJob: Job? = null
+    private var updateCheckJob: Job? = null
+    private var updateDownloadJob: Job? = null
+    private var pendingRelease: AppRelease? = null
 
     init {
         models.ensureDefaultSelection()
@@ -139,6 +157,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         refreshTranscripts()
         refreshWatchFolder()
         FolderWatchScheduler.sync(application)
+        _state.value = _state.value.copy(
+            appUpdate = AppUpdateUi(currentVersion = BuildConfig.VERSION_NAME),
+        )
+        checkAppUpdate(manual = false)
         if (_state.value.selectedModel == null) {
             _state.value = _state.value.copy(screen = Screen.Models)
         }
@@ -268,6 +290,87 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearMessages() {
         _state.value = _state.value.copy(error = null, notice = null)
+    }
+
+    // --------------------------------------------------------- app update ---
+
+    fun checkAppUpdate(manual: Boolean = true) {
+        if (updateCheckJob?.isActive == true || updateDownloadJob?.isActive == true) return
+        updateCheckJob = viewModelScope.launch {
+            val current = _state.value.appUpdate
+            _state.value = _state.value.copy(appUpdate = current.copy(checking = true, downloadProgress = 0f))
+            try {
+                val release = AppReleaseChecker.fetchLatest(BuildConfig.VERSION_NAME)
+                pendingRelease = release
+                val available = release != null &&
+                    AppVersion.isNewer(release.version, BuildConfig.VERSION_NAME)
+                _state.value = _state.value.copy(
+                    appUpdate = AppUpdateUi(
+                        currentVersion = BuildConfig.VERSION_NAME,
+                        latestVersion = release?.version,
+                        updateAvailable = available,
+                        checking = false,
+                    ),
+                )
+                if (manual) {
+                    val message = when {
+                        release == null -> "업데이트 정보를 가져오지 못했습니다."
+                        available -> "새 버전 ${release.version}을(를) 받을 수 있습니다."
+                        else -> "이미 최신 버전(${BuildConfig.VERSION_NAME})입니다."
+                    }
+                    _state.value = _state.value.copy(notice = message)
+                }
+            } catch (t: Throwable) {
+                _state.value = _state.value.copy(
+                    appUpdate = current.copy(checking = false),
+                    error = if (manual) {
+                        t.message ?: "업데이트를 확인하지 못했습니다."
+                    } else {
+                        null
+                    },
+                )
+            }
+        }
+    }
+
+    fun downloadAppUpdate() {
+        val release = pendingRelease
+        if (release == null || !_state.value.appUpdate.updateAvailable) {
+            checkAppUpdate(manual = true)
+            return
+        }
+        val app = getApplication<Application>()
+        if (!AppUpdateInstaller.canRequestPackageInstalls(app)) {
+            _state.value = _state.value.copy(
+                error = "설치하려면 ‘알 수 없는 앱’ 설치를 허용해 주세요.",
+            )
+            AppUpdateInstaller.openUnknownSourcesSettings(app)
+            return
+        }
+        updateDownloadJob?.cancel()
+        updateDownloadJob = viewModelScope.launch {
+            val base = _state.value.appUpdate
+            _state.value = _state.value.copy(
+                appUpdate = base.copy(downloading = true, downloadProgress = 0f),
+            )
+            try {
+                val apk = AppUpdateInstaller.downloadApk(app, release.apkUrl) { progress ->
+                    _state.value = _state.value.copy(
+                        appUpdate = _state.value.appUpdate.copy(downloadProgress = progress),
+                    )
+                }
+                AppUpdateInstaller.launchInstall(app, apk)
+                _state.value = _state.value.copy(
+                    appUpdate = _state.value.appUpdate.copy(downloading = false),
+                    notice = "설치 화면에서 업데이트를 완료해 주세요.",
+                )
+            } catch (t: Throwable) {
+                _state.value = _state.value.copy(
+                    appUpdate = _state.value.appUpdate.copy(downloading = false),
+                    error = t.message ?: "업데이트를 받지 못했습니다.",
+                )
+            }
+        }
     }
 
     // ------------------------------------------------------ folder watch ---
@@ -720,6 +823,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         timerJob?.cancel()
         workJob?.cancel()
         watchScanJob?.cancel()
+        updateCheckJob?.cancel()
+        updateDownloadJob?.cancel()
         recorder?.cancel()
         transcriber?.cancel()
     }

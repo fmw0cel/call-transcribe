@@ -134,6 +134,9 @@ fun AppRoot(vm: AppViewModel = viewModel()) {
                     watchQueue = state.watchQueue,
                     onTranscribeWatchQueued = vm::transcribeWatchQueued,
                     onDismissWatchQueued = vm::dismissWatchQueued,
+                    appUpdate = state.appUpdate,
+                    onCheckUpdate = { vm.checkAppUpdate(manual = true) },
+                    onDownloadUpdate = vm::downloadAppUpdate,
                 )
 
                 Screen.WatchFolder -> WatchFolderScreen(

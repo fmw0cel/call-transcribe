@@ -86,6 +86,9 @@ fun HomeScreen(
     watchQueue: List<WatchQueuedFile>,
     onTranscribeWatchQueued: (String) -> Unit,
     onDismissWatchQueued: (String) -> Unit,
+    appUpdate: AppUpdateUi,
+    onCheckUpdate: () -> Unit,
+    onDownloadUpdate: () -> Unit,
 ) {
     var pendingDelete by remember { mutableStateOf<Transcript?>(null) }
 
@@ -180,6 +183,14 @@ fun HomeScreen(
         }
 
         item {
+            AppUpdateCard(
+                update = appUpdate,
+                onCheckUpdate = onCheckUpdate,
+                onDownloadUpdate = onDownloadUpdate,
+            )
+        }
+
+        item {
             SettingsCard(
                 language = state.language,
                 translate = state.translate,
@@ -242,6 +253,56 @@ fun HomeScreen(
                 TextButton(onClick = { pendingDelete = null }) { Text("취소") }
             },
         )
+    }
+}
+
+@Composable
+private fun AppUpdateCard(
+    update: AppUpdateUi,
+    onCheckUpdate: () -> Unit,
+    onDownloadUpdate: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("앱 버전", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        text = buildString {
+                            append("현재 v${update.currentVersion}")
+                            update.latestVersion?.let { append(" · 최신 v$it") }
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (update.updateAvailable) {
+                    Button(
+                        onClick = onDownloadUpdate,
+                        enabled = !update.downloading && !update.checking,
+                    ) {
+                        Text(if (update.downloading) "받는 중…" else "업데이트")
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = onCheckUpdate,
+                        enabled = !update.checking && !update.downloading,
+                    ) {
+                        Text(if (update.checking) "확인 중…" else "업데이트 확인")
+                    }
+                }
+            }
+            if (update.downloading) {
+                LinearProgressIndicator(
+                    progress = { update.downloadProgress.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth().height(4.dp),
+                )
+            }
+        }
     }
 }
 
@@ -377,7 +438,7 @@ private fun ModelStrip(model: String?, onOpenModels: () -> Unit) {
                 )
                 Text(
                     text = if (model == null) {
-                        "Base 모델(약 60MB) 받기 권장 · 오프라인 전사"
+                        "일반 모델(약 60MB) 받기 권장 · 오프라인 전사"
                     } else {
                         "기기 내 추론 · 오프라인"
                     },
